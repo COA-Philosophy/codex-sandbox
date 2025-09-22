@@ -1,0 +1,204 @@
+// path: src/features/board/ui/StructureBoardPane.tsx
+"use client";
+
+import React from "react";
+import { Task, HandoffSnapshot } from "@/types/structure";
+import { useStructureBoard } from "@/features/board/model/useStructureBoard";
+import { useTaskFilters } from "@/features/board/model/useTaskFilters";
+import { useActiveTask } from "@/features/board/model/useActiveTask";
+import { useViewMode, ViewMode } from "@/features/board/model/useViewMode";
+
+// デバッグ用: 追加インポート
+import { useStructureStore } from "@/store/structureStore";
+
+// 一時的にコンポーネントを外部から受け取る形式
+// 後でこれらのコンポーネントも分離予定
+interface StructureBoardPaneProps {
+  Header: React.ComponentType;
+  HandoffBar: React.ComponentType<{
+    activeTaskId: string | null;
+    viewMode: ViewMode;
+    ownerFilter: any;
+    phaseFilter: any;
+    selectedTags: string[];
+    tasks: Task[];
+    onApplySnapshot: (snapshot: HandoffSnapshot) => void;
+  }>;
+  Toolbar: React.ComponentType<any>;
+  KanbanBoard: React.ComponentType<any>;
+  TreeView: React.ComponentType<any>;
+  DepGraphView: React.ComponentType<any>;
+  ArchitecturePlaceholder: React.ComponentType;
+  DetailPanel: React.ComponentType<any>;
+}
+
+/**
+ * StructureBoard のメインコンテナコンポーネント
+ * 全ての状態管理フックを統合し、UIコンポーネントに props として渡す
+ */
+export function StructureBoardPane({
+  Header,
+  HandoffBar,
+  Toolbar,
+  KanbanBoard,
+  TreeView,
+  DepGraphView,
+  ArchitecturePlaceholder,
+  DetailPanel
+}: StructureBoardPaneProps) {
+  // 状態管理フックの初期化
+  const boardState = useStructureBoard();
+  const filterState = useTaskFilters(boardState.tasks);
+  const activeState = useActiveTask();
+  const viewState = useViewMode("kanban");
+
+  // デバッグ用: 追加フック
+  const debugStore = useStructureStore();
+
+  // デバッグ用: useEffect追加
+  React.useEffect(() => {
+    // デバッグ関数をwindowオブジェクトに設定
+    (window as any).debugStructureStore = () => {
+      console.log('=== Store Debug Information ===');
+      console.log('Tasks count:', debugStore.getTaskCount());
+      console.log('Tasks:', debugStore.tasks);
+      console.log('isDirty:', debugStore.isDirty);
+      console.log('handoffs:', debugStore.handoffs);
+      console.log('lastSnapshotAt:', debugStore.lastSnapshotAt);
+      console.log('=== Legacy Board State ===');
+      console.log('Legacy tasks count:', boardState.tasks?.length || 0);
+      console.log('Legacy tasks:', boardState.tasks);
+    };
+
+    // 自動実行してデバッグ情報を表示
+    console.log('StructureStore debug ready. Run: window.debugStructureStore()');
+    setTimeout(() => {
+      (window as any).debugStructureStore();
+    }, 1000); // 1秒後に自動実行
+
+    // クリーンアップ
+    return () => {
+      delete (window as any).debugStructureStore;
+    };
+  }, [debugStore, boardState]);
+
+  // タスク更新時にアクティブタスクの同期を行う
+  const handleUpdateTask = (id: string, patch: Partial<Task>) => {
+    boardState.updateTask(id, patch);
+    
+    // アクティブタスクの同期
+    if (activeState.activeTaskId === id) {
+      const updatedTask = boardState.getTask(id);
+      if (updatedTask) {
+        activeState.syncActiveTask(updatedTask);
+      }
+    }
+  };
+
+  // タスクジャンプ処理（依存関係ナビゲーション用）
+  const handleJumpToTask = (taskId: string) => {
+    activeState.jumpToTask(taskId, boardState.tasks, viewState.setViewMode);
+  };
+
+  // ハンドオフスナップショット適用処理
+  const handleApplySnapshot = (snapshot: HandoffSnapshot) => {
+    // ビューモード適用
+    viewState.setViewMode(snapshot.view);
+    
+    // フィルター適用
+    filterState.setOwnerFilter(snapshot.ownerFilter);
+    filterState.setPhaseFilter(snapshot.phaseFilter);
+    filterState.setSelectedTags(snapshot.selectedTags);
+    
+    // アクティブタスク適用
+    if (snapshot.activeTaskId) {
+      const task = boardState.tasks.find(t => t.id === snapshot.activeTaskId);
+      if (task) {
+        activeState.selectTask(task);
+      }
+    } else {
+      activeState.clearSelection();
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="mx-auto max-w-7xl px-5 py-6">
+        {/* ヘッダー */}
+        <Header />
+        
+        {/* ハンドオフバー */}
+        <HandoffBar 
+          activeTaskId={activeState.activeTaskId}
+          viewMode={viewState.viewMode}
+          ownerFilter={filterState.ownerFilter}
+          phaseFilter={filterState.phaseFilter}
+          selectedTags={filterState.selectedTags}
+          tasks={boardState.tasks}
+          onApplySnapshot={handleApplySnapshot}
+        />
+        
+        {/* ツールバー（検索・フィルター・ビュー切り替え） */}
+        <Toolbar
+          // フィルター状態
+          q={filterState.query}
+          setQ={filterState.setQuery}
+          ownerFilter={filterState.ownerFilter}
+          setOwnerFilter={filterState.setOwnerFilter}
+          phaseFilter={filterState.phaseFilter}
+          setPhaseFilter={filterState.setPhaseFilter}
+          tagUniverse={filterState.tagUniverse}
+          selectedTags={filterState.selectedTags}
+          toggleTag={filterState.toggleTag}
+          
+          // ビュー状態
+          view={viewState.viewMode}
+          setView={viewState.setViewMode}
+        />
+
+        {/* メインコンテンツエリア */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 mt-4">
+          {/* 左側: ビューコンテンツ */}
+          <div>
+            {viewState.viewMode === "kanban" && (
+              <KanbanBoard 
+                tasks={filterState.filteredTasks}
+                onSelect={activeState.selectTask}
+                activeId={activeState.activeTaskId}
+              />
+            )}
+            
+            {viewState.viewMode === "tree" && (
+              <TreeView 
+                tasks={filterState.filteredTasks}
+                activeTask={activeState.activeTask}
+                onSelectTask={activeState.selectTask}
+              />
+            )}
+            
+            {viewState.viewMode === "depgraph" && (
+              <DepGraphView 
+                tasks={filterState.filteredTasks}
+                onSelect={activeState.selectTask}
+                activeId={activeState.activeTaskId}
+              />
+            )}
+            
+            {viewState.viewMode === "architecture" && (
+              <ArchitecturePlaceholder />
+            )}
+          </div>
+
+          {/* 右側: 詳細パネル */}
+          <DetailPanel 
+            task={activeState.activeTask}
+            tasks={boardState.tasks}
+            onClose={activeState.clearSelection}
+            onUpdateTask={handleUpdateTask}
+            onJumpToTask={handleJumpToTask}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

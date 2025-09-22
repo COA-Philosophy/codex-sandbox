@@ -1,0 +1,62 @@
+// path: app/api/archive/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+
+export async function GET() {
+  try {
+    console.debug('[orchestra] GET /api/archive - 簡易版Archive一覧取得開始');
+    
+    const { data, error } = await supabase
+      .from('v2_project_archives')
+      .select('*')
+      .order('completed_at', { ascending: false });
+    
+    if (error) {
+      console.error('[orchestra] Archive一覧取得エラー:', error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      id: `archive_list_${Date.now()}`,
+      object: 'archive_list',
+      created: Math.floor(Date.now() / 1000),
+      data: data || [],
+      total: data?.length || 0,
+    });
+  } catch (error) {
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { action, data } = await request.json();
+
+    if (action === 'create') {
+     const { error } = await supabase
+  .from('v2_project_archives')
+  .insert({
+    title: data.title,
+    structure_snapshot: data.structureSnapshot,
+    final_summary: data.summary ?? '',
+    tags: data.tags ?? [],
+    started_at: data.startedAt ?? null,
+    completed_at: data.completedAt ?? null,
+    completion_duration_hours: data.completionDurationHours ?? null,
+    environment: 'v2',
+    user_id: '00000000-0000-0000-0000-000000000001', // 固定UUID（テスト用）
+  });
+
+      if (error) {
+        console.error('[orchestra] Archive作成エラー:', error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ success: true, message: 'Archive作成完了' });
+    }
+
+    return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
+  }
+}
